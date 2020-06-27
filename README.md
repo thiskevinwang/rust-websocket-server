@@ -1,4 +1,80 @@
-# rust-hyper-redis
+<img src="/Rust-Redis-Docker.png">
+
+Topics:
+
+- ⚙️ Rust
+- 🟨 Hyper
+- 🟥 Redis
+- 🐳 Docker
+
+## Prerequisites
+
+### `docker`
+
+[Docker Desktop for Mac](https://hub.docker.com/editions/community/docker-ce-desktop-mac/)
+
+```sh
+docker --version
+# Docker version 19.03.8, build afacb8b
+```
+
+### `rustc` + `rustup` + `cargo`
+
+```sh
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+```sh
+rustc --version
+# rustc 1.44.1 (c7087fe00 2020-06-17)
+
+rustup --version
+# rustup 1.21.1 (7832b2ebe 2019-12-20)
+
+cargo version
+# cargo 1.44.1 (88ba85757 2020-06-11)
+```
+
+### Redis
+
+A local Redis container, running on `localhost:6379`
+
+```sh
+docker pull bitnami/redis
+
+# This will eat your terminal
+docker run --rm --name redis \
+  -e ALLOW_EMPTY_PASSWORD=yes \
+  -p 6379:6379 \
+  bitnami/redis
+
+# ctrl+c to stop
+```
+
+#### Optional
+
+Install the redis-cli
+
+```sh
+brew install redis
+
+redis-cli --version
+# redis-cli 6.0.5
+```
+
+Save your terminal
+
+```sh
+# Run docker in detached mode
+docker run --rm --name redis \
+  -e ALLOW_EMPTY_PASSWORD=yes \
+  -d -it -p 6379:6379 bitnami/redis
+
+# Stop the container
+docker stop redis
+```
+
+Database GUI? Visit [redis://127.0.0.1:6379](redis://127.0.0.1:6379) in a browser. On my machine, I get prompted to open **TablePlus**.
 
 ## Get started
 
