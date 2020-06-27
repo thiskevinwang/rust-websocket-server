@@ -1,5 +1,5 @@
 [package]
-name = "rust-hyper-redis"
+name = "rust-redis-docker"
 version = "0.1.0"
 authors = ["Kevin Wang <kwangsan@gmail.com>"]
 edition = "2018"
