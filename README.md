@@ -88,3 +88,19 @@ systemfd --no-pid -s http::3000 -- cargo watch -x run
 # Find previous task on a port
 netstat -vanp tcp | grep 3000
 ```
+
+## Building Docker Image
+
+```sh
+docker build --rm -t rust-redis-docker .
+docker images
+```
+
+## Running
+
+```sh
+docker run --rm \
+  --name rrd \
+  -p 3000:3000 \
+  rust-redis-docker:latest
+```

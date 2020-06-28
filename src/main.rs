@@ -25,7 +25,7 @@ async fn main() {
     /* for hot reloading */
     let mut listenfd = ListenFd::from_env();
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+    let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
 
     let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
 
@@ -49,8 +49,10 @@ async fn main() {
 }
 
 const REDIS_HOST: &str = "redis://127.0.0.1:6379";
+// const REDIS_HOST: &str = "redis://0.0.0.0:6379";
 
 fn fetch_an_integer() -> redis::RedisResult<isize> {
+    println!("attempting to fetch integer");
     // connect to redis
     let client = redis::Client::open(REDIS_HOST)?;
     let mut con: Connection = client.get_connection()?;
