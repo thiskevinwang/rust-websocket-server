@@ -11,7 +11,7 @@ use listenfd::ListenFd;
 async fn echo(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
     match (req.method(), req.uri().path()) {
         // Serve some instructions at /
-        (&Method::GET, "/") => Ok(Response::new(Body::from("Try visting /redis"))),
+        (&Method::GET, "/") => Ok(Response::new(Body::from("Try visiting /redis"))),
 
         (&Method::GET, "/redis") => {
             let val = fetch_an_integer();
