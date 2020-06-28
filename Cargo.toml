@@ -9,6 +9,17 @@ edition = "2018"
 redis = "0.16.0"
 hyper = "0.13"
 tokio = { version = "0.2", features = ["full"] }
+futures = "0.3"
 
 [dependencies.listenfd]
 version = "0.3"
+
+[source.crates-io]
+replace-with = 'vendored-sources'
+
+[source.vendored-sources]
+directory = '/usr/src/app/vendor'
+
+[[bin]]
+name = "rust-redis-docker"
+path = "src/main.rs"

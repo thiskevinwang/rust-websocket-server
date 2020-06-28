@@ -104,3 +104,21 @@ docker run --rm \
   -p 3000:3000 \
   rust-redis-docker:latest
 ```
+
+## Helpful things
+
+### Remove Dangling Images
+
+Remove those pesky `<none>` images when building new images
+
+```sh
+# fish-shell
+docker rmi (docker images -f 'dangling=true' -q)
+```
+
+### Remove All Stopped Containers
+
+```sh
+# fish-shell
+docker rm (docker ps -a -q)
+```

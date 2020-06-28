@@ -1,17 +1,33 @@
 use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Request, Response, Server};
+use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use redis::{Commands, Connection};
 use std::{convert::Infallible, net::SocketAddr};
 
 /* for hot reloading */
 use listenfd::ListenFd;
 
-async fn handle(_: Request<Body>) -> Result<Response<Body>, Infallible> {
-    let val = fetch_an_integer();
-    println!("{:?}", val);
-    Ok(Response::new(
-        format!("Hello world2, {:?}", val.unwrap()).into(),
-    ))
+/// This is our service handler. It receives a Request, routes on its
+/// path, and returns a Future of a Response.
+async fn echo(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
+    match (req.method(), req.uri().path()) {
+        // Serve some instructions at /
+        (&Method::GET, "/") => Ok(Response::new(Body::from("Try visting /redis"))),
+
+        (&Method::GET, "/redis") => {
+            let val = fetch_an_integer();
+            println!("{:?}", val);
+            Ok(Response::new(
+                format!("Hello world2, {:?}", val.unwrap()).into(),
+            ))
+        }
+
+        // Return the 404 Not Found for other routes.
+        _ => {
+            let mut not_found = Response::default();
+            *not_found.status_mut() = StatusCode::NOT_FOUND;
+            Ok(not_found)
+        }
+    }
 }
 
 /// Run with:
@@ -27,7 +43,7 @@ async fn main() {
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
 
-    let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
+    let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(echo)) });
 
     let server = if let Some(tcp_listener) = listenfd.take_tcp_listener(0).unwrap() {
         println!("→ Hot reloading 🔥");
@@ -48,13 +64,10 @@ async fn main() {
     }
 }
 
-const REDIS_HOST: &str = "redis://127.0.0.1:6379";
-// const REDIS_HOST: &str = "redis://0.0.0.0:6379";
-
 fn fetch_an_integer() -> redis::RedisResult<isize> {
     println!("attempting to fetch integer");
     // connect to redis
-    let client = redis::Client::open(REDIS_HOST)?;
+    let client = redis::Client::open("redis://127.0.0.1:6379")?;
     let mut con: Connection = client.get_connection()?;
     // throw away the result, just make sure it does not fail
 

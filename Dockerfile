@@ -3,25 +3,37 @@
 # Mini docker
 # https://github.com/kpcyrd/mini-docker-rust/blob/master/.dockerignore
 
+# -----------------
+# Cargo Build Stage
+# -----------------
+
 # Start with a rust alpine image
-FROM rust:1.44.1-alpine AS build
+FROM rust:1.44.1-alpine AS cargo-build
 RUN apk add --update cargo
 
 # if needed, install dependencies here
 #RUN apk add libseccomp-dev
 # set the workdir and copy the source into it
 WORKDIR /app
-COPY ./ /app
-# do a release build
+COPY Cargo.lock /app
+COPY Cargo.toml /app
+RUN mkdir .cargo
+RUN cargo vendor > /app/.cargo/config
+
+COPY ./src src
 RUN cargo build --release
+RUN cargo install --path . --verbose
+
+# -----------------
+# Final Stage
+# -----------------
 
 # use a plain alpine image, the alpine version needs to match the builder
 FROM alpine:3.11
 # if needed, install dependencies here
 #RUN apk add libseccomp
 # copy the binary into the final image
-COPY --from=0 /app/target/release/rust-redis-docker .
+COPY --from=cargo-build /app/target/release/rust-redis-docker .
 # set the binary as entrypoint
 
-EXPOSE 3000/tcp
 ENTRYPOINT ["/rust-redis-docker"]
