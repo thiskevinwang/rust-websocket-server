@@ -4,15 +4,15 @@ services:
   # RUST HYPER
   # ------
   hyper:
-    build: .
+    # build: .
     # alternatively, use image
-    # image: rust-redis-docker:latest
+    image: rust-redis-docker:latest
     ports:
       - "3000:3000"
     expose:
       - "3000"
-    # environment:
-    #   REDIS_HOST: redis
+    environment:
+      REDIS_HOST: redis
     links:
       - redis
     networks:

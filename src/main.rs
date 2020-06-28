@@ -1,7 +1,7 @@
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use redis::{Commands, Connection};
-use std::{convert::Infallible, net::SocketAddr};
+use std::{convert::Infallible, env, net::SocketAddr};
 
 /* for hot reloading */
 use listenfd::ListenFd;
@@ -66,8 +66,13 @@ async fn main() {
 
 fn fetch_an_integer() -> redis::RedisResult<isize> {
     println!("attempting to fetch integer");
+
+    let host = env::var("REDIS_HOST").unwrap_or("localhost".to_string());
+    println!("Host: {}", host);
+
     // connect to redis
-    let client = redis::Client::open("redis://127.0.0.1:6379")?;
+    let redis_connection_params = format!("redis://{host}:6379", host = host);
+    let client = redis::Client::open(redis_connection_params)?;
     let mut con: Connection = client.get_connection()?;
     // throw away the result, just make sure it does not fail
 
