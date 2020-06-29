@@ -1,39 +1,16 @@
 version: "3"
 services:
-  # ------
-  # RUST HYPER
-  # ------
   hyper:
     # build: .
     # alternatively, use image
     image: rust-redis-docker:latest
     ports:
       - "3000:3000"
-    expose:
-      - "3000"
     environment:
       REDIS_HOST: redis
-    links:
-      - redis
-    networks:
-      - rr-network
-    # network_mode: host
-  # ------
-  # Redis
-  # ------
   redis:
     image: "bitnami/redis:latest"
     ports:
       - "6379:6379"
-    expose:
-      - "6379"
     environment:
       ALLOW_EMPTY_PASSWORD: "yes"
-    networks:
-      - rr-network
-    # network_mode: host
-# networks syntax
-# https://github.com/docker/compose/issues/3238
-networks:
-  rr-network:
-    driver: bridge
