@@ -14,21 +14,24 @@ fn get_index(req: &Request<Body>) -> Result<Response<Body>, hyper::Error> {
     Ok(Response::new(Body::from("Try visting /redis")))
 }
 
+/// 404 handler
+/// Note: making the fn `async` requires you to add `.await`
+async fn handle_not_found(req: &Request<Body>) -> Result<Response<Body>, hyper::Error> {
+    let mut not_found = Response::default();
+    *not_found.status_mut() = StatusCode::NOT_FOUND;
+    *not_found.body_mut() = Body::from("You hit a route that doesn't exist");
+    Ok(not_found)
+}
+
 /// This is our service handler. It receives a Request, routes on its
 /// path, and returns a Future of a Response.
 async fn echo(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
     match (req.method(), req.uri().path()) {
-        // Serve some instructions at /
         (&Method::GET, "/") => get_index(&req),
-
         (&Method::GET, "/redis") => get_increment_count(&req),
 
         // Return the 404 Not Found for other routes.
-        _ => {
-            let mut not_found = Response::default();
-            *not_found.status_mut() = StatusCode::NOT_FOUND;
-            Ok(not_found)
-        }
+        _ => handle_not_found(&req).await,
     }
 }
 
