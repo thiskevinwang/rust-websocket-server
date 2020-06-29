@@ -1,32 +1,37 @@
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
-use redis::{Commands, Connection};
+
 use std::{convert::Infallible, net::SocketAddr};
 
 /* for hot reloading */
 use listenfd::ListenFd;
 
+mod helpers;
+use helpers::get_increment_count;
+
+/// Handle GET requests to /
+fn get_index(req: &Request<Body>) -> Result<Response<Body>, hyper::Error> {
+    Ok(Response::new(Body::from("Try visting /redis")))
+}
+
+/// 404 handler
+/// Note: making the fn `async` requires you to add `.await`
+async fn handle_not_found(req: &Request<Body>) -> Result<Response<Body>, hyper::Error> {
+    let mut not_found = Response::default();
+    *not_found.status_mut() = StatusCode::NOT_FOUND;
+    *not_found.body_mut() = Body::from("You hit a route that doesn't exist");
+    Ok(not_found)
+}
+
 /// This is our service handler. It receives a Request, routes on its
 /// path, and returns a Future of a Response.
 async fn echo(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
     match (req.method(), req.uri().path()) {
-        // Serve some instructions at /
-        (&Method::GET, "/") => Ok(Response::new(Body::from("Try visting /redis"))),
-
-        (&Method::GET, "/redis") => {
-            let val = fetch_an_integer();
-            println!("{:?}", val);
-            Ok(Response::new(
-                format!("Hello world2, {:?}", val.unwrap()).into(),
-            ))
-        }
+        (&Method::GET, "/") => get_index(&req),
+        (&Method::GET, "/redis") => get_increment_count(&req),
 
         // Return the 404 Not Found for other routes.
-        _ => {
-            let mut not_found = Response::default();
-            *not_found.status_mut() = StatusCode::NOT_FOUND;
-            Ok(not_found)
-        }
+        _ => handle_not_found(&req).await,
     }
 }
 
@@ -62,21 +67,6 @@ async fn main() {
     if let Err(e) = graceful.await {
         eprintln!("server error: {}", e);
     }
-}
-
-fn fetch_an_integer() -> redis::RedisResult<isize> {
-    println!("attempting to fetch integer");
-    // connect to redis
-    let client = redis::Client::open("redis://127.0.0.1:6379")?;
-    let mut con: Connection = client.get_connection()?;
-    // throw away the result, just make sure it does not fail
-
-    // Note - currently the browser will increment Redis twice.
-    // This is likely because the browser is make two requests;
-    // One for '/' and one for a favicon. The current code doe
-    // not differentiate between the two yet.
-    println!("incrementing");
-    con.incr("count", 1)
 }
 
 /// This is needed to avoid lingering processes when using hot reloading.
