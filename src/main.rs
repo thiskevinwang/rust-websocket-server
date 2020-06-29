@@ -6,6 +6,8 @@ use std::{convert::Infallible, net::SocketAddr};
 /* for hot reloading */
 use listenfd::ListenFd;
 
+use futures::TryStreamExt as _;
+
 mod helpers;
 use helpers::get_increment_count;
 
@@ -29,7 +31,32 @@ async fn echo(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
     match (req.method(), req.uri().path()) {
         (&Method::GET, "/") => get_index(&req),
         (&Method::GET, "/redis") => get_increment_count(&req),
+        (&Method::POST, "/echo/uppercase") => {
+            println!("{} {}", &req.method(), &req.uri().path());
+            // This is actually a new `futures::Stream`...
+            let mapping = req.into_body().map_ok(|chunk| {
+                chunk
+                    .iter()
+                    .map(|byte| byte.to_ascii_uppercase())
+                    .collect::<Vec<u8>>()
+            });
 
+            let mut response = Response::new(Body::empty());
+            // Use `Body::wrap_stream` to convert it to a `Body`...
+            *response.body_mut() = Body::wrap_stream(mapping);
+            Ok(response)
+        }
+        (&Method::POST, "/echo/reverse") => {
+            let mut response = Response::new(Body::empty());
+            // Await the full body to be concatenated into a single `Bytes`...
+            let full_body = hyper::body::to_bytes(req.into_body()).await?;
+
+            // Iterate the full body in reverse order and collect into a new Vec.
+            let reversed = full_body.iter().rev().cloned().collect::<Vec<u8>>();
+
+            *response.body_mut() = reversed.into();
+            Ok(response)
+        }
         // Return the 404 Not Found for other routes.
         _ => handle_not_found(&req).await,
     }
