@@ -9,12 +9,17 @@ use listenfd::ListenFd;
 mod helpers;
 use helpers as h;
 
+/// Handle GET requests to /
+fn get_index(req: &Request<Body>) -> Result<Response<Body>, hyper::Error> {
+    Ok(Response::new(Body::from("Try visting /redis")))
+}
+
 /// This is our service handler. It receives a Request, routes on its
 /// path, and returns a Future of a Response.
 async fn echo(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
     match (req.method(), req.uri().path()) {
         // Serve some instructions at /
-        (&Method::GET, "/") => Ok(Response::new(Body::from("Try visting /redis"))),
+        (&Method::GET, "/") => get_index(&req),
 
         (&Method::GET, "/redis") => {
             let val = h::fetch_an_integer();
