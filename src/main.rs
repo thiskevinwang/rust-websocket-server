@@ -1,13 +1,13 @@
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
 
-use std::{convert::Infallible, env, net::SocketAddr};
+use std::{convert::Infallible, net::SocketAddr};
 
 /* for hot reloading */
 use listenfd::ListenFd;
 
 mod helpers;
-use helpers as h;
+use helpers::get_increment_count;
 
 /// Handle GET requests to /
 fn get_index(req: &Request<Body>) -> Result<Response<Body>, hyper::Error> {
@@ -21,13 +21,7 @@ async fn echo(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
         // Serve some instructions at /
         (&Method::GET, "/") => get_index(&req),
 
-        (&Method::GET, "/redis") => {
-            let val = h::fetch_an_integer();
-            println!("{:?}", val);
-            Ok(Response::new(
-                format!("Hello world2, {:?}", val.unwrap()).into(),
-            ))
-        }
+        (&Method::GET, "/redis") => get_increment_count(&req),
 
         // Return the 404 Not Found for other routes.
         _ => {

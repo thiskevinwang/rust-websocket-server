@@ -1,2 +1,2 @@
-mod fetch_an_integer;
-pub use fetch_an_integer::fetch_an_integer;
+mod get_increment_count;
+pub use get_increment_count::get_increment_count;
