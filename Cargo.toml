@@ -1,7 +1,7 @@
 [package]
 name = "rust-redis-docker"
-version = "0.1.0"
-authors = ["Kevin Wang <kwangsan@gmail.com>"]
+version = "0.1.1"
+authors = ["Kevin Wang"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
