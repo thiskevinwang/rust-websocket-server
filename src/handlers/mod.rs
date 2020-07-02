@@ -2,8 +2,11 @@
 /// Notice how thanks to using `Filter::and`, we can define a function
 /// with the exact arguments we'd expect from each filter in the chain.
 /// No tuples are needed, it's auto flattened for the functions.
-
 use super::models::{Db, ListOptions, Todo};
+use redis::aio::{ConnectionManager, MultiplexedConnection};
+use redis::Commands;
+use redis::{Connection, ConnectionInfo};
+
 use std::convert::Infallible;
 use warp::http::StatusCode;
 
@@ -39,11 +42,7 @@ pub async fn create_todo(create: Todo, db: Db) -> Result<impl warp::Reply, Infal
     Ok(StatusCode::CREATED)
 }
 
-pub async fn update_todo(
-    id: u64,
-    update: Todo,
-    db: Db,
-) -> Result<impl warp::Reply, Infallible> {
+pub async fn update_todo(id: u64, update: Todo, db: Db) -> Result<impl warp::Reply, Infallible> {
     log::debug!("update_todo: id={}, todo={:?}", id, update);
     let mut vec = db.lock().await;
 
@@ -83,5 +82,20 @@ pub async fn delete_todo(id: u64, db: Db) -> Result<impl warp::Reply, Infallible
     } else {
         log::debug!("    -> todo id not found!");
         Ok(StatusCode::NOT_FOUND)
+    }
+}
+
+pub async fn increment_counter(info: ConnectionInfo) -> Result<impl warp::Reply, Infallible> {
+    log::debug!("increment_counter");
+
+    let client = redis::Client::open(info.clone()).unwrap();
+    println!("1");
+    if let Ok(mut con) = client.get_connection() {
+        println!("2");
+        let count: isize = con.incr("count", 1).unwrap();
+        println!("3");
+        Ok(warp::reply::json(&count))
+    } else {
+        panic!(format!("Failed to establish a connection to Redis. Double check there is a Redis instance running at {}", &info.addr));
     }
 }

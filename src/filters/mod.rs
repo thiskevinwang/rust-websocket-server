@@ -1,13 +1,19 @@
 use super::handlers;
 use super::models::{Db, ListOptions, Todo};
+use redis::aio::MultiplexedConnection;
+use redis::ConnectionInfo;
 use warp::Filter;
 
 /// The 4 TODOs filters combined.
-pub fn todos(db: Db) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+pub fn todos(
+    db: Db,
+    info: ConnectionInfo,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
     todos_list(db.clone())
         .or(todos_create(db.clone()))
         .or(todos_update(db.clone()))
         .or(todos_delete(db))
+        .or(increment_counter(info))
 }
 
 /// GET /todos?offset=3&limit=5
@@ -59,6 +65,22 @@ pub fn todos_delete(
         .and(warp::delete())
         .and(with_db(db))
         .and_then(handlers::delete_todo)
+}
+
+/// GET /counter/
+pub fn increment_counter(
+    info: ConnectionInfo,
+) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+    warp::path!("counter")
+        .and(warp::get())
+        .and(with_redis(info))
+        .and_then(handlers::increment_counter)
+}
+
+fn with_redis(
+    info: ConnectionInfo,
+) -> impl Filter<Extract = (ConnectionInfo,), Error = std::convert::Infallible> + Clone {
+    warp::any().map(move || info.clone())
 }
 
 fn with_db(db: Db) -> impl Filter<Extract = (Db,), Error = std::convert::Infallible> + Clone {
