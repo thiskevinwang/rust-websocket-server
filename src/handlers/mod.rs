@@ -89,11 +89,8 @@ pub async fn increment_counter(info: ConnectionInfo) -> Result<impl warp::Reply,
     log::debug!("increment_counter");
 
     let client = redis::Client::open(info.clone()).unwrap();
-    println!("1");
     if let Ok(mut con) = client.get_connection() {
-        println!("2");
         let count: isize = con.incr("count", 1).unwrap();
-        println!("3");
         Ok(warp::reply::json(&count))
     } else {
         panic!(format!("Failed to establish a connection to Redis. Double check there is a Redis instance running at {}", &info.addr));
