@@ -122,3 +122,9 @@ docker rmi (docker images -f 'dangling=true' -q)
 # fish-shell
 docker rm (docker ps -a -q)
 ```
+
+### Test POST request to server
+
+```sh
+curl -X POST http://localhost:3000/echo/uppercase -d "poop"
+```

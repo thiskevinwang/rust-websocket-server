@@ -1,80 +1,185 @@
-use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Method, Request, Response, Server, StatusCode};
+// #![deny(warnings)]
+use std::collections::HashMap;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 
-use std::{convert::Infallible, net::SocketAddr};
+use futures::{FutureExt, StreamExt};
+use serde_derive::{Deserialize, Serialize};
+use tokio::sync::{mpsc, RwLock};
+use warp::ws::{Message, WebSocket};
+use warp::Filter;
 
-/* for hot reloading */
-use listenfd::ListenFd;
+/// Our global unique user id counter.
+static NEXT_USER_ID: AtomicUsize = AtomicUsize::new(1);
 
-mod helpers;
-use helpers::get_increment_count;
+/// Our state of currently connected users.
+///
+/// - Key is their id
+/// - Value is a sender of `warp::ws::Message`
+type Users = Arc<RwLock<HashMap<usize, mpsc::UnboundedSender<Result<Message, warp::Error>>>>>;
 
-/// Handle GET requests to /
-fn get_index(req: &Request<Body>) -> Result<Response<Body>, hyper::Error> {
-    Ok(Response::new(Body::from("Try visting /redis")))
-}
-
-/// 404 handler
-/// Note: making the fn `async` requires you to add `.await`
-async fn handle_not_found(req: &Request<Body>) -> Result<Response<Body>, hyper::Error> {
-    let mut not_found = Response::default();
-    *not_found.status_mut() = StatusCode::NOT_FOUND;
-    *not_found.body_mut() = Body::from("You hit a route that doesn't exist");
-    Ok(not_found)
-}
-
-/// This is our service handler. It receives a Request, routes on its
-/// path, and returns a Future of a Response.
-async fn echo(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
-    match (req.method(), req.uri().path()) {
-        (&Method::GET, "/") => get_index(&req),
-        (&Method::GET, "/redis") => get_increment_count(&req),
-
-        // Return the 404 Not Found for other routes.
-        _ => handle_not_found(&req).await,
-    }
-}
-
-/// Run with:
-/// - cargo run
-/// Run with hot reloading:
-/// - systemfd --no-pid -s http::3000 -- cargo watch -x run
-/// Find previous task on a port
-/// - netstat -vanp tcp | grep 3000    
 #[tokio::main]
 async fn main() {
-    /* for hot reloading */
-    let mut listenfd = ListenFd::from_env();
+    pretty_env_logger::init();
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
+    // Keep track of all connected users, key is usize, value
+    // is a websocket sender.
+    let users_arc = Users::default();
+    let users_arc_2 = users_arc.clone();
+    // Turn our "state" into a new Filter...
+    let users = warp::any().map(move || users_arc.clone());
+    let users_2 = warp::any().map(move || users_arc_2.clone());
 
-    let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(echo)) });
+    // GET /users
+    let get_users = warp::path("users").and(users_2).map(|u| {
+        println!("GET /users, {:?}", u);
+        // GET /users, RwLock { s: Semaphore { permits: 64 }, c: UnsafeCell }
 
-    let server = if let Some(tcp_listener) = listenfd.take_tcp_listener(0).unwrap() {
-        println!("→ Hot reloading 🔥");
-        println!("http://{}", tcp_listener.local_addr().unwrap());
-        Server::from_tcp(tcp_listener).unwrap().serve(make_svc)
+        // FIXME
+        warp::reply::json(&1)
+    });
+
+    // GET /chat -> websocket upgrade
+    let chat = warp::path("chat")
+        // The `ws()` filter will prepare Websocket handshake...
+        .and(warp::ws())
+        .and(users)
+        .map(|ws: warp::ws::Ws, users| {
+            println!("GET /chat");
+            // This will call our function if the handshake succeeds.
+            ws.on_upgrade(move |socket| user_connected(socket, users))
+        });
+
+    // GET / -> index html
+    let index = warp::path::end().map(|| {
+        println!("GET /");
+        warp::reply::html(INDEX_HTML)
+    });
+    let health = warp::path("health").map(|| {
+        println!("GET /health");
+        warp::reply::json(&"ok".to_string())
+    });
+
+    let routes = index.or(chat).or(health).or(get_users);
+
+    warp::serve(routes).run(([0, 0, 0, 0], 3000)).await;
+}
+
+async fn user_connected(ws: WebSocket, users: Users) {
+    // Use a counter to assign a new unique ID for this user.
+    let my_id = NEXT_USER_ID.fetch_add(1, Ordering::Relaxed);
+
+    eprintln!("new chat user: {}", my_id);
+
+    // Split the socket into a sender and receive of messages.
+    let (user_ws_tx, mut user_ws_rx) = ws.split();
+
+    // Use an unbounded channel to handle buffering and flushing of messages
+    // to the websocket...
+    let (tx, rx) = mpsc::unbounded_channel();
+    tokio::task::spawn(rx.forward(user_ws_tx).map(|result| {
+        if let Err(e) = result {
+            eprintln!("websocket send error: {}", e);
+        }
+    }));
+
+    // Save the sender in our list of connected users.
+    users.write().await.insert(my_id, tx);
+
+    // Return a `Future` that is basically a state machine managing
+    // this specific user's connection.
+
+    // Make an extra clone to give to our disconnection handler...
+    let users2 = users.clone();
+
+    // Every time the user sends a message, broadcast it to
+    // all other users...
+    while let Some(result) = user_ws_rx.next().await {
+        let msg = match result {
+            Ok(msg) => msg,
+            Err(e) => {
+                eprintln!("websocket error(uid={}): {}", my_id, e);
+                break;
+            }
+        };
+        user_message(my_id, msg, &users).await;
+    }
+
+    // user_ws_rx stream will keep processing as long as the user stays
+    // connected. Once they disconnect, then...
+    user_disconnected(my_id, &users2).await;
+}
+
+async fn user_message(my_id: usize, msg: Message, users: &Users) {
+    // Skip any non-Text messages...
+    let msg = if let Ok(s) = msg.to_str() {
+        println!("{:?}", s);
+        s
     } else {
-        println!("→ Starting a new service ✨");
-        println!("http://{}", addr);
-        Server::bind(&addr).serve(make_svc)
+        return;
     };
 
-    // And now add a graceful shutdown signal...
-    let graceful = server.with_graceful_shutdown(shutdown_signal());
+    let new_msg = format!("<User#{}>: {}", my_id, msg);
 
-    // Run this server for... forever!
-    if let Err(e) = graceful.await {
-        eprintln!("server error: {}", e);
+    // New message from this user, send it to everyone else (except same uid)...
+    for (&uid, tx) in users.read().await.iter() {
+        if my_id != uid {
+            if let Err(_disconnected) = tx.send(Ok(Message::text(new_msg.clone()))) {
+                // The tx is disconnected, our `user_disconnected` code
+                // should be happening in another task, nothing more to
+                // do here.
+            }
+        }
     }
 }
 
-/// This is needed to avoid lingering processes when using hot reloading.
-/// The error:
-/// > error: EADDRINUSE: Address already in use
-async fn shutdown_signal() {
-    // Wait for the CTRL+C signal
-    tokio::signal::ctrl_c()
-        .await
-        .expect("failed to install CTRL+C signal handler");
+async fn user_disconnected(my_id: usize, users: &Users) {
+    eprintln!("good bye user: {}", my_id);
+
+    // Stream closed up, so remove from the user list
+    users.write().await.remove(&my_id);
 }
+
+static INDEX_HTML: &str = r#"<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <title>Warp Chat</title>
+    </head>
+    <body>
+        <h1>Warp chat</h1>
+        <div id="chat">
+            <p><em>Connecting...</em></p>
+        </div>
+        <input type="text" id="text" />
+        <button type="button" id="send">Send</button>
+        <script type="text/javascript">
+        const chat = document.getElementById('chat');
+        const text = document.getElementById('text');
+        const uri = 'ws://' + location.host + '/chat';
+        const ws = new WebSocket(uri);
+        function message(data) {
+            const line = document.createElement('p');
+            line.innerText = data;
+            chat.appendChild(line);
+        }
+        ws.onopen = function() {
+            chat.innerHTML = '<p><em>Connected!</em></p>';
+        };
+        ws.onmessage = function(msg) {
+            message(msg.data);
+        };
+        ws.onclose = function() {
+            chat.getElementsByTagName('em')[0].innerText = 'Disconnected!';
+        };
+        send.onclick = function() {
+            const msg = text.value;
+            ws.send(msg);
+            text.value = '';
+            message('<You>: ' + msg);
+        };
+        </script>
+    </body>
+</html>
+"#;
