@@ -1,6 +1,6 @@
 [package]
 name = "rust-redis-docker"
-version = "0.1.1"
+version = "0.1.3"
 authors = ["Kevin Wang"]
 edition = "2018"
 
