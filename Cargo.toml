@@ -12,7 +12,7 @@ tokio = { version = "0.2", features = ["full", "macros"] }
 warp = "0.2"
 pretty_env_logger = "*"
 log = "*"
-serde = "1.0.114"
+serde = { version = "1.0.114", features = ["rc"] }
 serde_derive = "1.0.114"
 futures = "0.3"
 
