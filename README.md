@@ -76,6 +76,24 @@ docker stop redis
 
 Database GUI? Visit [redis://127.0.0.1:6379](redis://127.0.0.1:6379) in a browser. On my machine, I get prompted to open **TablePlus**.
 
+### Postgres
+
+Run a postgres docker container
+
+- https://hub.docker.com/_/postgres
+
+```
+docker run --rm --name postboi \
+  -e POSTGRES_PASSWORD=mysecretpassword \
+  -d -p 8080:5432 postgres:13-alpine
+```
+
+Connection string in browser (should open TablePlus, or other app)
+
+`postgres://<POSTGRES_USER>:<POSTGRES_PASSWORD>@<HOST>:<PORT>/<DB>`
+
+`postgres://postgres:mysecretpassword@127.0.0.1:8080/postgres`
+
 ## Get started
 
 ```sh
