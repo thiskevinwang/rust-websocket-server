@@ -1,15 +1,77 @@
 // #![deny(warnings)]
 use std::collections::HashMap;
+
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
 };
 
+use std::time::{Duration, Instant};
+
+use chrono::{Datelike, NaiveDateTime};
 use futures::{FutureExt, StreamExt};
 use serde_derive::{Deserialize, Serialize};
 use tokio::sync::{mpsc, RwLock};
+use tokio_postgres::{Client, Error, NoTls, Row};
+use uuid::Uuid;
 use warp::ws::{Message, WebSocket};
 use warp::Filter;
+
+#[macro_use]
+extern crate log;
+
+mod deserializers;
+use deserializers::from_timestamp;
+
+mod initialize_logger;
+use initialize_logger::initialize_logger;
+
+mod create_connection;
+use create_connection::create_connection;
+
+#[derive(Deserialize, Debug)]
+pub struct User {
+    pub id: Uuid,
+    #[serde(deserialize_with = "from_timestamp")]
+    pub created: NaiveDateTime,
+    #[serde(deserialize_with = "from_timestamp")]
+    pub updated: NaiveDateTime,
+    #[serde(deserialize_with = "from_timestamp")]
+    pub deleted: NaiveDateTime,
+    pub _type: String,
+    pub username: String,
+    pub email: String,
+    pub password: String,
+    pub first_name: String,
+    pub last_name: String,
+    pub avatar_url: String,
+    #[serde(deserialize_with = "from_timestamp")]
+    pub last_password_request: NaiveDateTime,
+    #[serde(deserialize_with = "from_timestamp")]
+    pub verified_date: NaiveDateTime,
+    pub banned: bool,
+}
+
+impl From<Row> for User {
+    fn from(row: Row) -> Self {
+        Self {
+            id: row.get("id"),
+            created: row.get("created"),
+            updated: row.get("updated"),
+            deleted: row.get("deleted"),
+            _type: row.get("type"),
+            username: row.get("username"),
+            email: row.get("email"),
+            password: row.get("password"),
+            first_name: row.get("first_name"),
+            last_name: row.get("last_name"),
+            avatar_url: row.get("avatar_url"),
+            last_password_request: row.get("last_password_request"),
+            verified_date: row.get("verified_date"),
+            banned: row.get("banned"),
+        }
+    }
+}
 
 /// Our global unique user id counter.
 static NEXT_USER_ID: AtomicUsize = AtomicUsize::new(1);
@@ -21,8 +83,37 @@ static NEXT_USER_ID: AtomicUsize = AtomicUsize::new(1);
 type Users = Arc<RwLock<HashMap<usize, mpsc::UnboundedSender<Result<Message, warp::Error>>>>>;
 
 #[tokio::main]
-async fn main() {
-    pretty_env_logger::init();
+async fn main() -> Result<(), Error> {
+    initialize_logger(log::Level::Debug);
+    let client = create_connection().await?;
+
+    // Now we can execute a simple statement that just returns its parameter.
+    let now = Instant::now();
+    let rows = client.query("SELECT * FROM users;", &[]).await?;
+    info!("Time Elapsed: {}", now.elapsed().as_secs());
+
+    // // this needs feature: `"with-uuid-0_8"`
+    // let user_uuid: Uuid = rows[0].get("id");
+    // debug!("user_uuid, {:?}", user_uuid);
+
+    // let user_username: String = rows[0].get("username");
+    // debug!("user_username, {:?}", user_username);
+
+    // // this needs feature: `"with-chrono-0_4"`
+    // let user_created: NaiveDateTime = rows[0].get("created");
+    // debug!("user_created, {:?}", user_created);
+
+    for row in rows {
+        // let cols = row.columns();
+        // for col in cols {
+        //     debug!("{}|{}", col.name(), col.type_());
+        // }
+        let user = User::from(row);
+        debug!("{:?}", user);
+    }
+
+    // And then check that we got back the same string we sent over.
+    // let value: &str = rows[0].get(0);
 
     // Keep track of all connected users, key is usize, value
     // is a websocket sender.
@@ -65,6 +156,7 @@ async fn main() {
     let routes = index.or(chat).or(health).or(get_users);
 
     warp::serve(routes).run(([0, 0, 0, 0], 3000)).await;
+    Ok(())
 }
 
 async fn user_connected(ws: WebSocket, users: Users) {
