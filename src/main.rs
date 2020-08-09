@@ -1,77 +1,27 @@
-// #![deny(warnings)]
 use std::collections::HashMap;
-
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
 };
+use std::time::Instant;
 
-use std::time::{Duration, Instant};
-
-use chrono::{Datelike, NaiveDateTime};
 use futures::{FutureExt, StreamExt};
-use serde_derive::{Deserialize, Serialize};
 use tokio::sync::{mpsc, RwLock};
-use tokio_postgres::{Client, Error, NoTls, Row};
-use uuid::Uuid;
+use tokio_postgres::Error;
 use warp::ws::{Message, WebSocket};
 use warp::Filter;
 
 #[macro_use]
 extern crate log;
 
-mod deserializers;
-use deserializers::from_timestamp;
+mod models;
+use models::{Attempt, User};
 
 mod initialize_logger;
 use initialize_logger::initialize_logger;
 
 mod create_connection;
 use create_connection::create_connection;
-
-#[derive(Deserialize, Debug)]
-pub struct User {
-    pub id: Uuid,
-    #[serde(deserialize_with = "from_timestamp")]
-    pub created: NaiveDateTime,
-    #[serde(deserialize_with = "from_timestamp")]
-    pub updated: NaiveDateTime,
-    #[serde(deserialize_with = "from_timestamp")]
-    pub deleted: NaiveDateTime,
-    pub _type: String,
-    pub username: String,
-    pub email: String,
-    pub password: String,
-    pub first_name: String,
-    pub last_name: String,
-    pub avatar_url: String,
-    #[serde(deserialize_with = "from_timestamp")]
-    pub last_password_request: NaiveDateTime,
-    #[serde(deserialize_with = "from_timestamp")]
-    pub verified_date: NaiveDateTime,
-    pub banned: bool,
-}
-
-impl From<Row> for User {
-    fn from(row: Row) -> Self {
-        Self {
-            id: row.get("id"),
-            created: row.get("created"),
-            updated: row.get("updated"),
-            deleted: row.get("deleted"),
-            _type: row.get("type"),
-            username: row.get("username"),
-            email: row.get("email"),
-            password: row.get("password"),
-            first_name: row.get("first_name"),
-            last_name: row.get("last_name"),
-            avatar_url: row.get("avatar_url"),
-            last_password_request: row.get("last_password_request"),
-            verified_date: row.get("verified_date"),
-            banned: row.get("banned"),
-        }
-    }
-}
 
 /// Our global unique user id counter.
 static NEXT_USER_ID: AtomicUsize = AtomicUsize::new(1);
@@ -88,29 +38,49 @@ async fn main() -> Result<(), Error> {
     let client = create_connection().await?;
 
     // Now we can execute a simple statement that just returns its parameter.
+
+    // tokio::spawn(async move {
+    //     info!("THREAD 1");
+    //     let now = Instant::now();
+    //     let rows = client.query("SELECT * FROM users;", &[]).await;
+    //     info!("--- Took {}μs", now.elapsed().as_micros());
+    // });
+
+    // tokio::spawn(async move {
+    //     info!("THREAD 2");
+    //     let now = Instant::now();
+    //     let rows = client.query("SELECT * FROM attemps;", &[]).await;
+    //     info!("--- Took {}μs", now.elapsed().as_micros());
+    // });
+
+    info!("SELECT * FROM users;");
     let now = Instant::now();
-    let rows = client.query("SELECT * FROM users;", &[]).await?;
-    info!("Time Elapsed: {}", now.elapsed().as_secs());
+    let rows = client
+        .query(
+            "SELECT * FROM users LIMIT $1 OFFSET $2;",
+            &[&None::<i64>, &None::<i64>],
+        )
+        .await?;
+    info!("--- Took {}μs", now.elapsed().as_micros());
 
-    // // this needs feature: `"with-uuid-0_8"`
-    // let user_uuid: Uuid = rows[0].get("id");
-    // debug!("user_uuid, {:?}", user_uuid);
+    // info!("SELECT * FROM attempts;");
+    // let now = Instant::now();
+    // let rows = client
+    //     .query(
+    //         "SELECT * FROM attempts LIMIT $1 OFFSET $2;",
+    //         &[&100i64, &100i64],
+    //     )
+    //     .await?;
+    // info!("--- Took {}μs", now.elapsed().as_micros());
 
-    // let user_username: String = rows[0].get("username");
-    // debug!("user_username, {:?}", user_username);
-
-    // // this needs feature: `"with-chrono-0_4"`
-    // let user_created: NaiveDateTime = rows[0].get("created");
-    // debug!("user_created, {:?}", user_created);
-
+    let mut pg_users: Vec<User> = vec![];
+    info!("Deserializing {} Rows", rows.len());
+    let now = Instant::now();
     for row in rows {
-        // let cols = row.columns();
-        // for col in cols {
-        //     debug!("{}|{}", col.name(), col.type_());
-        // }
         let user = User::from(row);
-        debug!("{:?}", user);
+        pg_users.push(user);
     }
+    info!("--- Took {}μs", now.elapsed().as_micros());
 
     // And then check that we got back the same string we sent over.
     // let value: &str = rows[0].get(0);
@@ -123,13 +93,14 @@ async fn main() -> Result<(), Error> {
     let users = warp::any().map(move || users_arc.clone());
     let users_2 = warp::any().map(move || users_arc_2.clone());
 
+    let pg_rows = warp::any().map(move || pg_users.clone());
     // GET /users
-    let get_users = warp::path("users").and(users_2).map(|u| {
+    let get_users = warp::path("users").and(pg_rows).map(|u| {
         println!("GET /users, {:?}", u);
         // GET /users, RwLock { s: Semaphore { permits: 64 }, c: UnsafeCell }
 
         // FIXME
-        warp::reply::json(&1)
+        warp::reply::json(&u)
     });
 
     // GET /chat -> websocket upgrade
