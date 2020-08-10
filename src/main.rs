@@ -1,13 +1,18 @@
 use std::collections::HashMap;
+use std::convert::Infallible;
+use std::str::FromStr;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
 };
 use std::time::Instant;
 
+use bb8::Pool;
+use bb8_postgres::PostgresConnectionManager;
 use futures::{FutureExt, StreamExt};
+use serde::Deserialize;
 use tokio::sync::{mpsc, RwLock};
-use tokio_postgres::Error;
+use tokio_postgres::{Error, NoTls, Row};
 use warp::ws::{Message, WebSocket};
 use warp::Filter;
 
@@ -32,26 +37,28 @@ static NEXT_USER_ID: AtomicUsize = AtomicUsize::new(1);
 /// - Value is a sender of `warp::ws::Message`
 type Users = Arc<RwLock<HashMap<usize, mpsc::UnboundedSender<Result<Message, warp::Error>>>>>;
 
+fn with_pool(
+    pool: Pool<PostgresConnectionManager<NoTls>>,
+) -> impl Filter<Extract = (Pool<PostgresConnectionManager<NoTls>>,), Error = std::convert::Infallible>
+       + Clone {
+    warp::any().map(move || pool.clone())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     initialize_logger(log::Level::Debug);
     let client = create_connection().await?;
 
-    // Now we can execute a simple statement that just returns its parameter.
-
-    // tokio::spawn(async move {
-    //     info!("THREAD 1");
-    //     let now = Instant::now();
-    //     let rows = client.query("SELECT * FROM users;", &[]).await;
-    //     info!("--- Took {}μs", now.elapsed().as_micros());
-    // });
-
-    // tokio::spawn(async move {
-    //     info!("THREAD 2");
-    //     let now = Instant::now();
-    //     let rows = client.query("SELECT * FROM attemps;", &[]).await;
-    //     info!("--- Took {}μs", now.elapsed().as_micros());
-    // });
+    // ------------------------------------------------------------------------
+    let config = tokio_postgres::config::Config::from_str(
+        "postgres://postgres:mysecretpassword@localhost:8080/postgres",
+    )
+    .unwrap();
+    let pg_mgr = PostgresConnectionManager::new(config, tokio_postgres::NoTls);
+    let pool = match Pool::builder().build(pg_mgr).await {
+        Ok(pool) => pool,
+        Err(e) => panic!("builder error: {:?}", e),
+    };
 
     info!("SELECT * FROM users;");
     let now = Instant::now();
@@ -88,12 +95,11 @@ async fn main() -> Result<(), Error> {
     // Keep track of all connected users, key is usize, value
     // is a websocket sender.
     let users_arc = Users::default();
-    let users_arc_2 = users_arc.clone();
     // Turn our "state" into a new Filter...
     let users = warp::any().map(move || users_arc.clone());
-    let users_2 = warp::any().map(move || users_arc_2.clone());
 
     let pg_rows = warp::any().map(move || pg_users.clone());
+
     // GET /users
     let get_users = warp::path("users").and(pg_rows).map(|u| {
         println!("GET /users, {:?}", u);
@@ -102,6 +108,50 @@ async fn main() -> Result<(), Error> {
         // FIXME
         warp::reply::json(&u)
     });
+
+    #[derive(Deserialize)]
+    struct Options {
+        limit: Option<i64>,
+        offset: Option<i64>,
+    }
+    let get_attempts = warp::path!("attempts")
+        .and(with_pool(pool.clone()))
+        .and(warp::query::<Options>())
+        .and_then(query_attempts);
+
+    async fn query_attempts(
+        pool: Pool<PostgresConnectionManager<NoTls>>,
+        opts: Options,
+    ) -> Result<impl warp::Reply, Infallible> {
+        let limit = if let Some(_limit) = opts.limit {
+            Some(_limit)
+        } else {
+            None::<i64>
+        };
+        let offset = match opts.offset {
+            Some(_offset) => Some(_offset),
+            None::<i64> => None::<i64>,
+        };
+
+        info!("Limit: {:?}, Offset: {:?}", limit, offset);
+
+        let conn = pool.get().await.unwrap();
+        let rows = conn
+            .query(
+                "SELECT * FROM attempts LIMIT $1 OFFSET $2;",
+                &[&limit, &offset],
+            )
+            .await
+            .unwrap();
+        let mut attempts_array: Vec<Attempt> = vec![];
+        for row in rows {
+            let attempt = Attempt::from(Row::from(row));
+            attempts_array.push(attempt);
+        }
+
+        // https://docs.rs/warp/0.2.4/warp/reply/fn.json.html
+        Ok(warp::reply::json(&attempts_array))
+    }
 
     // GET /chat -> websocket upgrade
     let chat = warp::path("chat")
@@ -124,7 +174,7 @@ async fn main() -> Result<(), Error> {
         warp::reply::json(&"ok".to_string())
     });
 
-    let routes = index.or(chat).or(health).or(get_users);
+    let routes = index.or(chat).or(health).or(get_users).or(get_attempts);
 
     warp::serve(routes).run(([0, 0, 0, 0], 3000)).await;
     Ok(())
