@@ -25,9 +25,6 @@ use models::{Attempt, User};
 mod initialize_logger;
 use initialize_logger::initialize_logger;
 
-mod create_connection;
-use create_connection::create_connection;
-
 /// Our global unique user id counter.
 static NEXT_USER_ID: AtomicUsize = AtomicUsize::new(1);
 
@@ -37,6 +34,27 @@ static NEXT_USER_ID: AtomicUsize = AtomicUsize::new(1);
 /// - Value is a sender of `warp::ws::Message`
 type Users = Arc<RwLock<HashMap<usize, mpsc::UnboundedSender<Result<Message, warp::Error>>>>>;
 
+#[derive(Deserialize)]
+struct Options {
+    limit: Option<i64>,
+    offset: Option<i64>,
+}
+
+/// # with_pool
+/// Taken from https://blog.logrocket.com/create-an-async-crud-web-service-in-rust-with-warp/
+///
+/// @usage
+/// ```
+/// let get_users = warp::path!("users")
+/// .and(with_pool(pool.clone()))
+/// .and(warp::query::<Options>())
+/// .map(
+///     |pool: Pool<PostgresConnectionManager<NoTls>>, opts: Options| {
+///         info!("GET /users");
+///         warp::reply::json(&1)
+///     },
+/// );
+/// ```
 fn with_pool(
     pool: Pool<PostgresConnectionManager<NoTls>>,
 ) -> impl Filter<Extract = (Pool<PostgresConnectionManager<NoTls>>,), Error = std::convert::Infallible>
@@ -47,7 +65,6 @@ fn with_pool(
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     initialize_logger(log::Level::Debug);
-    let client = create_connection().await?;
 
     // ------------------------------------------------------------------------
     let config = tokio_postgres::config::Config::from_str(
@@ -60,35 +77,6 @@ async fn main() -> Result<(), Error> {
         Err(e) => panic!("builder error: {:?}", e),
     };
 
-    info!("SELECT * FROM users;");
-    let now = Instant::now();
-    let rows = client
-        .query(
-            "SELECT * FROM users LIMIT $1 OFFSET $2;",
-            &[&None::<i64>, &None::<i64>],
-        )
-        .await?;
-    info!("--- Took {}μs", now.elapsed().as_micros());
-
-    // info!("SELECT * FROM attempts;");
-    // let now = Instant::now();
-    // let rows = client
-    //     .query(
-    //         "SELECT * FROM attempts LIMIT $1 OFFSET $2;",
-    //         &[&100i64, &100i64],
-    //     )
-    //     .await?;
-    // info!("--- Took {}μs", now.elapsed().as_micros());
-
-    let mut pg_users: Vec<User> = vec![];
-    info!("Deserializing {} Rows", rows.len());
-    let now = Instant::now();
-    for row in rows {
-        let user = User::from(row);
-        pg_users.push(user);
-    }
-    info!("--- Took {}μs", now.elapsed().as_micros());
-
     // And then check that we got back the same string we sent over.
     // let value: &str = rows[0].get(0);
 
@@ -98,28 +86,39 @@ async fn main() -> Result<(), Error> {
     // Turn our "state" into a new Filter...
     let users = warp::any().map(move || users_arc.clone());
 
-    let pg_rows = warp::any().map(move || pg_users.clone());
-
     // GET /users
-    let get_users = warp::path("users").and(pg_rows).map(|u| {
-        println!("GET /users, {:?}", u);
-        // GET /users, RwLock { s: Semaphore { permits: 64 }, c: UnsafeCell }
+    async fn async_query_users(
+        pool: Pool<PostgresConnectionManager<NoTls>>,
+        opts: Options,
+    ) -> Result<impl warp::Reply, Infallible> {
+        info!("GET /users");
+        let limit = if let Some(_limit) = opts.limit {
+            Some(_limit)
+        } else {
+            None::<i64>
+        };
+        let offset = match opts.offset {
+            Some(_offset) => Some(_offset),
+            None::<i64> => None::<i64>,
+        };
+        let conn = pool.get().await.unwrap();
+        let rows = conn
+            .query(
+                "SELECT * FROM users LIMIT $1 OFFSET $2;",
+                &[&limit, &offset],
+            )
+            .await
+            .unwrap();
+        let mut users_array: Vec<User> = vec![];
+        for row in rows {
+            let user = User::from(Row::from(row));
+            users_array.push(user);
+        }
 
-        // FIXME
-        warp::reply::json(&u)
-    });
+        Ok(warp::reply::json(&users_array))
+    };
 
-    #[derive(Deserialize)]
-    struct Options {
-        limit: Option<i64>,
-        offset: Option<i64>,
-    }
-    let get_attempts = warp::path!("attempts")
-        .and(with_pool(pool.clone()))
-        .and(warp::query::<Options>())
-        .and_then(query_attempts);
-
-    async fn query_attempts(
+    async fn async_query_attempts(
         pool: Pool<PostgresConnectionManager<NoTls>>,
         opts: Options,
     ) -> Result<impl warp::Reply, Infallible> {
@@ -152,6 +151,16 @@ async fn main() -> Result<(), Error> {
         // https://docs.rs/warp/0.2.4/warp/reply/fn.json.html
         Ok(warp::reply::json(&attempts_array))
     }
+
+    let get_users = warp::path!("users")
+        .and(with_pool(pool.clone()))
+        .and(warp::query::<Options>())
+        .and_then(async_query_users);
+
+    let get_attempts = warp::path!("attempts")
+        .and(with_pool(pool.clone()))
+        .and(warp::query::<Options>())
+        .and_then(async_query_attempts);
 
     // GET /chat -> websocket upgrade
     let chat = warp::path("chat")
