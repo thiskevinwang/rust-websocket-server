@@ -9,10 +9,12 @@ use std::time::Instant;
 
 use bb8::Pool;
 use bb8_postgres::PostgresConnectionManager;
+use chrono::NaiveDateTime;
 use futures::{FutureExt, StreamExt};
 use serde::Deserialize;
 use tokio::sync::{mpsc, RwLock};
 use tokio_postgres::{Error, NoTls, Row};
+use uuid::Uuid;
 use warp::ws::{Message, WebSocket};
 use warp::Filter;
 
@@ -38,6 +40,12 @@ type Users = Arc<RwLock<HashMap<usize, mpsc::UnboundedSender<Result<Message, war
 struct Options {
     limit: Option<i64>,
     offset: Option<i64>,
+}
+
+#[derive(Deserialize)]
+struct Range {
+    start: Option<i64>,
+    end: Option<i64>,
 }
 
 /// # with_pool
@@ -118,6 +126,69 @@ async fn main() -> Result<(), Error> {
         Ok(warp::reply::json(&users_array))
     };
 
+    /// # GET /users/:userId/attempts
+    /// QUERY STRING PARAMS
+    /// - `limit=15`, `offset=15`, `start=1596192327`, `end=1597192327`
+    /// - `/users/a5f5d36a-6677-41c2-85b8-7578b4d98972/attempts?limit=15&offset=15&start=1596192327&end=1597192327`
+    async fn async_query_attempts_for_user(
+        user_id: Uuid,
+        pool: Pool<PostgresConnectionManager<NoTls>>,
+        opts: Options,
+        range: Range,
+    ) -> Result<impl warp::Reply, Infallible> {
+        info!("async_query_attempts_for_user");
+        let now = Instant::now();
+        let limit = if let Some(_limit) = opts.limit {
+            Some(_limit)
+        } else {
+            None::<i64>
+        };
+        let offset = match opts.offset {
+            Some(_offset) => Some(_offset),
+            None::<i64> => None::<i64>,
+        };
+
+        let (start, end) = match (range.start, range.end) {
+            (Some(start_s), Some(end_s)) => {
+                // convert js date as number (milliseconds)
+                // to rust NaiveDateTime timestamp (seconds)
+                let start = NaiveDateTime::from_timestamp(start_s / 1000, 0);
+                let end = NaiveDateTime::from_timestamp(end_s / 1000, 0);
+                (Some(start), Some(end))
+            }
+            _ => (None, None),
+        };
+
+        info!("{:?}...{:?}", start, end);
+        let conn = pool.get().await.unwrap();
+        let rows = conn
+            .query(
+                "
+            SELECT *
+            FROM attempts a
+	        LEFT 
+            JOIN users u
+                ON u.id = a.user_id
+            WHERE a.user_id = u.id
+                AND u.id = $1
+                AND a.date BETWEEN SYMMETRIC $2 AND $3
+            LIMIT $4
+            OFFSET $5;
+            ",
+                &[&user_id, &start, &end, &limit, &offset],
+            )
+            .await
+            .unwrap();
+        let mut attempts_array: Vec<Attempt> = vec![];
+        for row in rows {
+            let attempt = Attempt::from(Row::from(row));
+            attempts_array.push(attempt);
+        }
+
+        info!("{}μs", now.elapsed().as_micros());
+        Ok(warp::reply::json(&attempts_array))
+    };
+
     async fn async_query_attempts(
         pool: Pool<PostgresConnectionManager<NoTls>>,
         opts: Options,
@@ -162,6 +233,14 @@ async fn main() -> Result<(), Error> {
         .and(warp::query::<Options>())
         .and_then(async_query_attempts);
 
+    let cors = warp::cors().allow_any_origin();
+    let get_attempts_for_user = warp::path!("users" / Uuid / "attempts")
+        .and(with_pool(pool.clone()))
+        .and(warp::query::<Options>())
+        .and(warp::query::<Range>())
+        .and_then(async_query_attempts_for_user)
+        .with(cors);
+
     // GET /chat -> websocket upgrade
     let chat = warp::path("chat")
         // The `ws()` filter will prepare Websocket handshake...
@@ -183,7 +262,12 @@ async fn main() -> Result<(), Error> {
         warp::reply::json(&"ok".to_string())
     });
 
-    let routes = index.or(chat).or(health).or(get_users).or(get_attempts);
+    let routes = index
+        .or(chat)
+        .or(health)
+        .or(get_users)
+        .or(get_attempts)
+        .or(get_attempts_for_user);
 
     warp::serve(routes).run(([0, 0, 0, 0], 3000)).await;
     Ok(())
