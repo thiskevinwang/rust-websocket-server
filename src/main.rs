@@ -172,6 +172,7 @@ async fn main() -> Result<(), Error> {
             WHERE a.user_id = u.id
                 AND u.id = $1
                 AND a.date BETWEEN SYMMETRIC $2 AND $3
+            ORDER BY date ASC
             LIMIT $4
             OFFSET $5;
             ",
