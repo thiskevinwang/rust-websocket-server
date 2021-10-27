@@ -42,6 +42,16 @@ async fn main() -> Result<(), Error> {
     let users_arc = Users::default();
     // Turn our "state" into a new Filter...
     let users = warp::any().map(move || users_arc.clone());
+    let users_2 = warp::any().map(move || users_arc_2.clone());
+
+    // GET /users
+    let get_users = warp::path("users").and(users_2).map(|u| {
+        println!("GET /users, {:?}", u);
+        // GET /users, RwLock { s: Semaphore { permits: 64 }, c: UnsafeCell }
+
+        // FIXME
+        warp::reply::json(&1)
+    });
 
     let cors = warp::cors().allow_any_origin();
     // GET /chat -> websocket upgrade
