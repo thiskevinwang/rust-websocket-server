@@ -8,7 +8,7 @@
 # -----------------
 
 # Start with a rust alpine image
-FROM rust:1.44.1-alpine AS cargo-build
+FROM rust:1.56.0-alpine AS cargo-build
 RUN apk add --update cargo
 
 # if needed, install dependencies here

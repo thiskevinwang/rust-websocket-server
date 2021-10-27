@@ -1,15 +1,25 @@
-// #![deny(warnings)]
 use std::collections::HashMap;
+use std::convert::Infallible;
+use std::str::FromStr;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
 };
+use std::time::Instant;
 
 use futures::{FutureExt, StreamExt};
-use serde_derive::{Deserialize, Serialize};
+use hyper::Error;
+use serde::Deserialize;
 use tokio::sync::{mpsc, RwLock};
+use warp::http::header::{HeaderMap, HeaderValue};
 use warp::ws::{Message, WebSocket};
 use warp::Filter;
+
+#[macro_use]
+extern crate log;
+
+mod initialize_logger;
+use initialize_logger::initialize_logger;
 
 /// Our global unique user id counter.
 static NEXT_USER_ID: AtomicUsize = AtomicUsize::new(1);
@@ -21,8 +31,11 @@ static NEXT_USER_ID: AtomicUsize = AtomicUsize::new(1);
 type Users = Arc<RwLock<HashMap<usize, mpsc::UnboundedSender<Result<Message, warp::Error>>>>>;
 
 #[tokio::main]
-async fn main() {
-    pretty_env_logger::init();
+async fn main() -> Result<(), Error> {
+    initialize_logger(log::Level::Debug);
+
+    // And then check that we got back the same string we sent over.
+    // let value: &str = rows[0].get(0);
 
     // Keep track of all connected users, key is usize, value
     // is a websocket sender.
@@ -41,8 +54,9 @@ async fn main() {
         warp::reply::json(&1)
     });
 
+    let cors = warp::cors().allow_any_origin();
     // GET /chat -> websocket upgrade
-    let chat = warp::path("chat")
+    let chat_route = warp::path("chat")
         // The `ws()` filter will prepare Websocket handshake...
         .and(warp::ws())
         .and(users)
@@ -53,18 +67,19 @@ async fn main() {
         });
 
     // GET / -> index html
-    let index = warp::path::end().map(|| {
+    let index_route = warp::path::end().map(|| {
         println!("GET /");
         warp::reply::html(INDEX_HTML)
     });
-    let health = warp::path("health").map(|| {
+    let health_route = warp::path("health").map(|| {
         println!("GET /health");
         warp::reply::json(&"ok".to_string())
     });
 
-    let routes = index.or(chat).or(health).or(get_users);
+    let routes = index_route.or(chat_route).or(health_route);
 
-    warp::serve(routes).run(([0, 0, 0, 0], 3000)).await;
+    warp::serve(routes).run(([0, 0, 0, 0], 3020)).await;
+    Ok(())
 }
 
 async fn user_connected(ws: WebSocket, users: Users) {

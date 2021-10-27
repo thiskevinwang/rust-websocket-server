@@ -6,14 +6,17 @@ edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
+chrono = { version = "0.4", features = ["serde"] }
 redis = { version = "0.16.0", features = ["connection-manager"] }
 hyper = "0.13"
 tokio = { version = "0.2", features = ["full", "macros"] }
+uuid = { version = "0.8", features = ["serde", "v4"] }
 warp = "0.2"
 pretty_env_logger = "*"
 log = "*"
-serde = { version = "1.0.114", features = ["rc"] }
+serde = { version = "1.0.114", features = ["rc", "derive"] }
 serde_derive = "1.0.114"
+serde_json = "1.0"
 futures = "0.3"
 
 [dependencies.listenfd]
