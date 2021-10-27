@@ -40,6 +40,7 @@ async fn main() -> Result<(), Error> {
     // Keep track of all connected users, key is usize, value
     // is a websocket sender.
     let users_arc = Users::default();
+    let users_arc_2 = users_arc.clone();
     // Turn our "state" into a new Filter...
     let users = warp::any().map(move || users_arc.clone());
     let users_2 = warp::any().map(move || users_arc_2.clone());
