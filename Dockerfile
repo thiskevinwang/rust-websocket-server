@@ -33,7 +33,7 @@ FROM alpine:3.11
 # if needed, install dependencies here
 #RUN apk add libseccomp
 # copy the binary into the final image
-COPY --from=cargo-build /app/target/release/rust-redis-docker .
+COPY --from=cargo-build /app/target/release/rust-websocket-server .
 # set the binary as entrypoint
 
-ENTRYPOINT ["/rust-redis-docker"]
+ENTRYPOINT ["/rust-websocket-server"]

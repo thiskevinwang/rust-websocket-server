@@ -1,5 +1,5 @@
 [package]
-name = "rust-redis-docker"
+name = "rust-websocket-server"
 version = "0.1.3"
 authors = ["Kevin Wang"]
 edition = "2018"
@@ -29,5 +29,5 @@ replace-with = 'vendored-sources'
 directory = '/usr/src/app/vendor'
 
 [[bin]]
-name = "rust-redis-docker"
+name = "rust-websocket-server"
 path = "src/main.rs"

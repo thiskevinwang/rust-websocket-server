@@ -3,7 +3,7 @@ services:
   hyper:
     # build: .
     # alternatively, use image
-    image: rust-redis-docker:latest
+    image: rust-websocket-server:latest
     ports:
       - "3000:3000"
     environment:

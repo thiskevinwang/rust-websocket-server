@@ -92,7 +92,7 @@ netstat -vanp tcp | grep 3000
 ## Building Docker Image
 
 ```sh
-docker build --rm -t rust-redis-docker .
+docker build --rm -t rust-websocket-server .
 docker images
 ```
 
@@ -101,8 +101,8 @@ docker images
 ```sh
 docker run --rm \
   --name rrd \
-  -p 3000:3000 \
-  rust-redis-docker:latest
+  -p 3000:3020\
+  rust-websocket-server:latest
 ```
 
 ## Helpful things
